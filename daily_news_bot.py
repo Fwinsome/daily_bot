@@ -3,7 +3,7 @@ import json
 import ssl
 import urllib.request
 import urllib.parse
-from datetime import datetime, timedelta
+from datetime import datetime
 import feedparser
 import google.generativeai as genai
 
@@ -16,10 +16,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
 
-# 配置 RSS 源
+# 配置 AI RSS 源
 AI_RSS = "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml"
-POLITICS_RSS = os.environ.get("POLITICS_RSS", "")
-ECONOMY_RSS = os.environ.get("ECONOMY_RSS", "")
 
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
@@ -29,7 +27,6 @@ def fetch_rss(url, limit=10):
     if not url:
         return []
     try:
-        # 使用自定义 requests 或 urllib 可以绕过部分防抓取，这里直接用 feedparser
         d = feedparser.parse(url)
         entries = []
         for entry in d.entries[:limit]:
@@ -37,6 +34,22 @@ def fetch_rss(url, limit=10):
         return entries
     except Exception as e:
         print(f"Failed to fetch RSS from {url}: {e}")
+        return []
+
+def fetch_github_commits(repo="ZhuLinsen/daily_stock_analysis", limit=10):
+    try:
+        url = f"https://api.github.com/repos/{repo}/commits"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        response = urllib.request.urlopen(req, context=ctx)
+        data = json.loads(response.read().decode('utf-8'))
+        
+        commits = []
+        for c in data[:limit]:
+            msg = c.get('commit', {}).get('message', '').split('\n')[0]
+            commits.append(f"- {msg}")
+        return commits
+    except Exception as e:
+        print(f"Failed to fetch commits for {repo}: {e}")
         return []
 
 def main():
@@ -47,31 +60,23 @@ def main():
     print("Fetching AI news...")
     ai_news = fetch_rss(AI_RSS, limit=5)
     
-    print("Fetching Politics news...")
-    politics_news = fetch_rss(POLITICS_RSS, limit=10)
-    if not politics_news:
-        politics_news = ["暂未提供时政 RSS 源或抓取失败。"]
-        
-    print("Fetching Economy news...")
-    economy_news = fetch_rss(ECONOMY_RSS, limit=10)
+    print("Fetching Economy/Finance (daily_stock_analysis) news...")
+    economy_news = fetch_github_commits()
     if not economy_news:
-        economy_news = ["暂未提供政经 RSS 源或抓取失败。"]
+        economy_news = ["暂无更新。"]
 
     prompt = f"""
-请分析以下今天来自三个领域（AI、时政、政经）的新闻。
+请分析以下今天来自两个领域（AI、财经/量化开源项目）的信息。
 任务要求：
-1. 找出这三个领域共同提到的核心事件，将其在最开头高亮显示，并用一句话说明这件事情在多个领域都有很大的影响。如果没有共同事件，也请在一开头高亮说明“今日各领域无共同重大事件”。
-2. 分别用简短的话总结这三个领域最值得关注的内容。
+1. 找出这两个领域共同提到的核心事件或关联（例如 AI 技术在财经领域的应用、自动化分析等），将其在最开头高亮显示，并用一句话说明这件事情的跨领域影响。如果没有共同事件，也请在一开头高亮说明“今日各领域无共同重大事件”。
+2. 分别用简短的话总结这两个领域最值得关注的内容。对于财经领域，内容来自于股票智能分析系统的最新代码更新日志。
 
-以下是原始新闻数据：
+以下是原始数据：
 
 【AI领域新闻】
 {chr(10).join(ai_news)}
 
-【时政领域新闻】
-{chr(10).join(politics_news)}
-
-【政经领域新闻】
+【财经量化系统更新 (ZhuLinsen/daily_stock_analysis)】
 {chr(10).join(economy_news)}
 """
 

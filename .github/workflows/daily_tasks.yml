@@ -34,8 +34,6 @@ jobs:
         env:
           SERVERCHAN_TOKEN: ${{ secrets.SERVERCHAN_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          POLITICS_RSS: ${{ secrets.POLITICS_RSS }}
-          ECONOMY_RSS: ${{ secrets.ECONOMY_RSS }}
         run: python daily_news_bot.py
         
       - name: Commit state changes
