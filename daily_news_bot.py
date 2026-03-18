@@ -5,7 +5,6 @@ import urllib.request
 import urllib.parse
 from datetime import datetime
 import feedparser
-import google.generativeai as genai
 
 # 配置 Server酱
 TOKEN = os.environ.get("SERVERCHAN_TOKEN", "491:lEN-K3hGEthDUM1z-Lue78zuYHWUsXk6hm")
@@ -13,8 +12,6 @@ CHAT_ID = 18148
 
 # 配置 Gemini
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
 
 # 配置 AI RSS 源
 AI_RSS = "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml"
@@ -82,11 +79,21 @@ def main():
 
     print("Generating summary with Gemini...")
     try:
-        model = genai.GenerativeModel('gemini-1.5-pro-latest')
-        response = model.generate_content(prompt)
-        summary = response.text
+        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent?key={GEMINI_API_KEY}"
+        payload = {
+            "contents": [{"parts": [{"text": prompt}]}]
+        }
+        req_data = json.dumps(payload).encode('utf-8')
+        gemini_req = urllib.request.Request(gemini_url, data=req_data, headers={'Content-Type': 'application/json'})
+        response = urllib.request.urlopen(gemini_req, context=ctx)
+        resp_data = json.loads(response.read().decode('utf-8'))
+        summary = resp_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "未能生成摘要")
     except Exception as e:
         print(f"Failed to generate content with Gemini: {e}")
+        try:
+            print(e.read().decode('utf-8'))
+        except:
+            pass
         return
 
     text_to_send = f"**每日新闻汇总 ({datetime.now().strftime('%Y-%m-%d')})**\n\n{summary}"
