@@ -23,7 +23,7 @@ AI_RSS_SOURCES = [
     {"name": "TechCrunch AI",   "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "limit": 5},
     {"name": "MIT Tech Review",  "url": "https://www.technologyreview.com/feed/",                "limit": 5},
     {"name": "Bleeding Balls HN","url": "https://hnrss.org/frontpage",                           "limit": 8},
-    {"name": "Juya AI Daily",    "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml", "limit": 5},
+    {"name": "Juya AI Daily",    "url": "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml", "limit": 5},
 ]
 
 FINANCE_RSS_SOURCES = [
