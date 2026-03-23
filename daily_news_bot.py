@@ -1,128 +1,284 @@
 import os
 import json
+import re
 import ssl
 import urllib.request
 import urllib.parse
 from datetime import datetime
 import feedparser
 
-# 配置 Server酱
-TOKEN = os.environ.get("SERVERCHAN_TOKEN", "491:lEN-K3hGEthDUM1z-Lue78zuYHWUsXk6hm")
-CHAT_ID = 18148
-
-# 配置 Gemini
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-
-# 配置 AI RSS 源
-AI_RSS = "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml"
+# ---------- 配置 ----------
+TOKEN = os.environ.get("SERVERCHAN_TOKEN", "")
+CHAT_ID = int(os.environ.get("CHAT_ID", "18148"))
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 
-def fetch_rss(url, limit=10):
-    if not url:
-        return []
-    try:
-        d = feedparser.parse(url)
-        entries = []
-        for entry in d.entries[:limit]:
-            entries.append(f"标题: {entry.get('title', '')}\n摘要: {entry.get('summary', '')}")
-        return entries
-    except Exception as e:
-        print(f"Failed to fetch RSS from {url}: {e}")
-        return []
+# ---------- 数据源配置 ----------
+AI_RSS_SOURCES = [
+    {"name": "Hacker News",      "url": "https://news.ycombinator.com/rss",              "limit": 10},
+    {"name": "VentureBeat AI",   "https://venturebeat.com/category/ai/feed/",            "limit": 5},
+    {"name": "TechCrunch AI",   "https://techcrunch.com/category/artificial-intelligence/feed/", "limit": 5},
+    {"name": "MIT Tech Review",  "https://www.technologyreview.com/feed/",                "limit": 5},
+    {"name": "Bleeding Balls HN","https://hnrss.org/frontpage",                           "limit": 8},
+    {"name": "Juya AI Daily",    "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml", "limit": 5},
+]
 
-def fetch_github_commits(repo="ZhuLinsen/daily_stock_analysis", limit=10):
+FINANCE_RSS_SOURCES = [
+    {"name": "华尔街见闻",       "url": "https://wallstreetcn.com/rss",                   "limit": 8},
+    {"name": "36氪",             "url": "https://36kr.com/feed",                          "limit": 8},
+    {"name": "FT中文网",         "url": "https://www.ftchinese.com/rss",                  "limit": 5},
+    {"name": "新浪财经",         "url": "https://rss.sina.com.cn/news/china/focus15.xml", "limit": 5},
+    {"name": "证券时报",         "url": "https://www.stcn.com/rss/",                      "limit": 5},
+]
+
+# ---------- 工具函数 ----------
+def clean_html(html_text):
+    """去掉 HTML 标签和多余空白"""
+    if not html_text:
+        return ""
+    # 去掉 HTML 标签
+    text = re.sub(r'<[^>]+>', '', html_text)
+    # 解码常见 HTML 实体
+    text = text.replace('&nbsp;', ' ').replace('&amp;', '&')
+    text = text.replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
+    text = text.replace('&#39;', "'")
+    # 合并多余空白
+    text = re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def fetch_rss(sources, limit_per_source=5):
+    """抓取多个 RSS 源，按时间去重合并"""
+    seen_urls = set()
+    all_entries = []
+
+    for src in sources:
+        url = src["url"]
+        try:
+            d = feedparser.parse(url)
+            for entry in d.entries[:src.get("limit", limit_per_source)]:
+                # 优先用 link 去重
+                link = entry.get("link", "").strip()
+                if link and link in seen_urls:
+                    continue
+                seen_urls.add(link)
+
+                title = clean_html(entry.get("title", ""))
+                # 优先取 summary-detail（完整摘要），fallback 到 summary（可能是 HTML）
+                summary_raw = entry.get("summary_detail", {}).get("value", "") \
+                           or entry.get("summary", "") \
+                           or entry.get("description", "")
+                summary = clean_html(summary_raw)
+
+                # 有些 RSS 的 title 本身就很长，做一次截断
+                if len(summary) > 500:
+                    summary = summary[:500] + "…"
+
+                all_entries.append({
+                    "source": src["name"],
+                    "title":  title,
+                    "summary": summary,
+                    "link":   link,
+                    "published": entry.get("published", ""),
+                })
+        except Exception as e:
+            print(f"[WARN] 抓取 RSS 失败 {url}: {e}")
+
+    # 按 published 时间逆序（越新越前），没有时间戳的放最后
+    def sort_key(e):
+        try:
+            from email.utils import parsedate_to_datetime
+            return parsedate_to_datetime(e["published"])
+        except Exception:
+            return datetime.min
+    all_entries.sort(key=sort_key, reverse=True)
+    return all_entries
+
+def dedup_by_title(entries, threshold=0.8):
+    """简单标题去重（防止相似标题重复出现）"""
+    if not entries:
+        return entries
+    result = [entries[0]]
+    titles_lower = [entries[0]["title"].lower()]
+    for e in entries[1:]:
+        title = e["title"].lower()
+        # 简单检查：标题是否已存在（包含关系）
+        is_dup = any(title in t or t in title for t in titles_lower)
+        if not is_dup:
+            result.append(e)
+            titles_lower.append(title)
+    return result
+
+# ---------- Gemini 总结 ----------
+def summarize_with_gemini(prompt, model="gemini-2.0-flash"):
+    if not GEMINI_API_KEY:
+        print("GEMINI_API_KEY not set.")
+        return None
     try:
-        url = f"https://api.github.com/repos/{repo}/commits"
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        response = urllib.request.urlopen(req, context=ctx)
-        data = json.loads(response.read().decode('utf-8'))
-        
-        commits = []
-        for c in data[:limit]:
-            msg = c.get('commit', {}).get('message', '').split('\n')[0]
-            commits.append(f"- {msg}")
-        return commits
+        url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+               f":generateContent?key={GEMINI_API_KEY}")
+        payload = {"contents": [{"parts": [{"text": prompt}]}]}
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data,
+              headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req, context=ctx, timeout=60)
+        resp_data = json.loads(resp.read().decode("utf-8"))
+        return resp_data["candidates"][0]["content"]["parts"][0]["text"]
     except Exception as e:
-        print(f"Failed to fetch commits for {repo}: {e}")
-        return []
+        print(f"[ERROR] Gemini 调用失败: {e}")
+        return None
+
+# ---------- 发送消息 ----------
+def send_message(text, silent=False):
+    if not TOKEN:
+        print("[ERROR] SERVERCHAN_TOKEN 未设置")
+        return False
+    url = f"https://bot-go.apijia.cn/bot{TOKEN}/sendMessage"
+    payload = {
+        "chat_id":    CHAT_ID,
+        "text":       text,
+        "parse_mode": "markdown",
+        "silent":     silent,
+    }
+    try:
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data,
+              headers={"Content-Type": "application/json"})
+        resp = urllib.request.urlopen(req, context=ctx, timeout=30)
+        result = json.loads(resp.read().decode("utf-8"))
+        if result.get("ok"):
+            print(f"[OK] 消息发送成功")
+            return True
+        else:
+            print(f"[ERROR] 发送失败: {result}")
+            return False
+    except Exception as e:
+        print(f"[ERROR] 发送请求失败: {e}")
+        return False
+
+def split_and_send(text, max_chars=1800):
+    """内容过长时拆成多条发送"""
+    if len(text) <= max_chars:
+        return send_message(text)
+    # 按换行分段，尽量保持段落完整
+    chunks = []
+    lines = text.split("\n")
+    current = ""
+    for line in lines:
+        if len(current) + len(line) + 1 <= max_chars:
+            current += ("\n" if current else "") + line
+        else:
+            if current:
+                chunks.append(current)
+            current = line
+    if current:
+        chunks.append(current)
+    for i, chunk in enumerate(chunks):
+        print(f"  -> 发送第 {i+1}/{len(chunks)} 条...")
+        send_message(chunk, silent=(i > 0))  # 第一条有声，后面静音
+
+# ---------- 主流程 ----------
+def build_ai_news_prompt(entries):
+    """构造 AI 新闻专用的总结 prompt"""
+    news_block = "\n".join(
+        f"[{i+1}] 来源：{e['source']}\n    标题：{e['title']}\n    摘要：{e['summary']}\n    链接：{e['link']}"
+        for i, e in enumerate(entries)
+    )
+    return f"""你是一个专业、简洁的科技新闻编辑。请从以下今日 AI / 科技领域资讯中提炼出真正有价值的信息。
+
+任务要求：
+1. 为每条新闻输出一行「一句话核心要点」（不超过 30 字），紧接着给出原始标题和链接。
+2. 按重要性排序（最重要的放最前）。
+3. 只保留有价值的内容，无关紧要的新闻可以直接跳过不呈现。
+4. 不要重复标题，不要添加你自己的解释性话语，直接输出结构化内容。
+5. 标题前加 "🔹" 前缀。
+
+输出格式（严格按此格式）：
+🔹 [一句话要点]
+   标题：xxx
+   链接：xxx
+
+---
+
+以下是原始资讯：
+
+{news_block}"""
+
+def build_finance_news_prompt(entries):
+    """构造财经新闻专用的总结 prompt"""
+    news_block = "\n".join(
+        f"[{i+1}] 来源：{e['source']}\n    标题：{e['title']}\n    摘要：{e['summary']}\n    链接：{e['link']}"
+        for i, e in enumerate(entries)
+    )
+    return f"""你是一个专业、简洁的财经新闻编辑。请从以下今日财经领域资讯中提炼出真正有价值的信息。
+
+任务要求：
+1. 为每条新闻输出一行「一句话核心要点」（不超过 30 字），紧接着给出原始标题和链接。
+2. 按重要性排序（最重要的放最前）。
+3. 只保留有价值的内容，无关紧要的新闻可以直接跳过不呈现。
+4. 不要重复标题，不要添加你自己的解释性话语，直接输出结构化内容。
+5. 标题前加 "🔸" 前缀。
+
+输出格式（严格按此格式）：
+🔸 [一句话要点]
+   标题：xxx
+   链接：xxx
+
+---
+
+以下是原始资讯：
+
+{news_block}"""
 
 def main():
-    if not GEMINI_API_KEY:
-        print("GEMINI_API_KEY not set. Exiting.")
+    if not GEMINI_API_KEY or not TOKEN:
+        print("缺少必要的环境变量。")
         return
 
-    print("Fetching AI news...")
-    ai_news = fetch_rss(AI_RSS, limit=5)
-    
-    print("Fetching Economy/Finance (daily_stock_analysis) news...")
-    economy_news = fetch_github_commits()
-    if not economy_news:
-        economy_news = ["暂无更新。"]
+    date_str = datetime.now().strftime("%Y-%m-%d")
 
-    prompt = f"""
-请分析以下今天来自两个领域（AI、财经/量化领域）的信息。
-任务要求：
-1. 找出这两个领域共同提到的核心事件或关联（例如 AI 技术在财经领域的应用、自动化分析等），将其在最开头高亮显示，并用一句话说明这件事情的跨领域影响。如果没有共同事件，也请在一开头高亮说明“今日各领域无共同重大事件”。
-2. 分别用简短的话总结这两个领域最值得关注的内容。对于财经领域，请使用“财经/量化领域关注点总结”作为标题，不要提及具体的 GitHub 仓库名称。
+    # ---- 抓取 AI 新闻 ----
+    print("==> 抓取 AI / 科技新闻...")
+    ai_raw = fetch_rss(AI_RSS_SOURCES)
+    ai_raw = dedup_by_title(ai_raw)
+    print(f"    共获取 {len(ai_raw)} 条（去重后）")
+    if not ai_raw:
+        ai_text = "今日暂无 AI 领域资讯。"
+    else:
+        prompt = build_ai_news_prompt(ai_raw)
+        ai_text = summarize_with_gemini(prompt) or "今日 AI 资讯整理失败。"
+        print(f"    AI 总结完成，长度 {len(ai_text)} 字")
 
-以下是原始数据：
+    # ---- 抓取财经新闻 ----
+    print("==> 抓取财经新闻...")
+    finance_raw = fetch_rss(FINANCE_RSS_SOURCES)
+    finance_raw = dedup_by_title(finance_raw)
+    print(f"    共获取 {len(finance_raw)} 条（去重后）")
+    if not finance_raw:
+        finance_text = "今日暂无财经资讯。"
+    else:
+        prompt = build_finance_news_prompt(finance_raw)
+        finance_text = summarize_with_gemini(prompt) or "今日财经资讯整理失败。"
+        print(f"    财经总结完成，长度 {len(finance_text)} 字")
 
-【AI领域新闻】
-{chr(10).join(ai_news)}
+    # ---- 组合发送 ----
+    header = f"**📅 每日新闻 {date_str}**\n\n"
 
-【财经量化领域信息】
-{chr(10).join(economy_news)}
-"""
+    ai_section = f"**【AI · 科技】**\n\n{ai_text}\n\n——\n"
+    finance_section = f"**【财经 · 市场】**\n\n{finance_text}"
 
-    print("Generating summary with Gemini...")
-    try:
-        gemini_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite-preview:generateContent?key={GEMINI_API_KEY}"
-        payload = {
-            "contents": [{"parts": [{"text": prompt}]}]
-        }
-        req_data = json.dumps(payload).encode('utf-8')
-        gemini_req = urllib.request.Request(gemini_url, data=req_data, headers={'Content-Type': 'application/json'})
-        response = urllib.request.urlopen(gemini_req, context=ctx)
-        resp_data = json.loads(response.read().decode('utf-8'))
-        summary = resp_data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "未能生成摘要")
-    except Exception as e:
-        print(f"Failed to generate content with Gemini: {e}")
-        try:
-            print(e.read().decode('utf-8'))
-        except:
-            pass
-        return
+    # 如果合并后太长，分开发；否则合并为一条
+    combined = header + ai_section + finance_section
+    if len(combined) > 3500:
+        # 分两条发：先发 AI
+        send_message(header + ai_section)
+        send_message(header + finance_section)
+    else:
+        split_and_send(combined)
 
-    text_to_send = f"**每日新闻汇总 ({datetime.now().strftime('%Y-%m-%d')})**\n\n{summary}"
+    print("==> 每日新闻发送完成。")
 
-    # Send via ServerChan Bot
-    bot_url = f'https://bot-go.apijia.cn/bot{TOKEN}/sendMessage'
-    payload = {
-        "chat_id": CHAT_ID,
-        "text": text_to_send,
-        "parse_mode": "markdown",
-        "silent": False
-    }
-    
-    data = json.dumps(payload).encode('utf-8')
-    req = urllib.request.Request(bot_url, data=data, headers={'Content-Type': 'application/json'})
-    
-    try:
-        response = urllib.request.urlopen(req, context=ctx)
-        result = json.loads(response.read().decode('utf-8'))
-        if result.get('ok'):
-            print(f"Successfully sent daily news summary.")
-        else:
-            print(f"Failed to send daily news: {result}")
-    except Exception as e:
-        print(f"API request failed: {e}")
-        try:
-            print(e.read().decode('utf-8'))
-        except:
-            pass
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
