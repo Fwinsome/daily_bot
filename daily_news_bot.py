@@ -18,20 +18,20 @@ ctx.verify_mode = ssl.CERT_NONE
 
 # ---------- 数据源配置 ----------
 AI_RSS_SOURCES = [
-    {"name": "Hacker News",      "url": "https://news.ycombinator.com/rss",              "limit": 10},
-    {"name": "VentureBeat AI",   "url": "https://venturebeat.com/category/ai/feed/",            "limit": 5},
-    {"name": "TechCrunch AI",   "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "limit": 5},
-    {"name": "MIT Tech Review",  "url": "https://www.technologyreview.com/feed/",                "limit": 5},
-    {"name": "Bleeding Balls HN","url": "https://hnrss.org/frontpage",                           "limit": 8},
-    {"name": "Juya AI Daily",    "url": "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml", "limit": 5},
+    {"name": "Hacker News",       "url": "https://news.ycombinator.com/rss",              "limit": 10},
+    {"name": "VentureBeat AI",    "url": "https://venturebeat.com/category/ai/feed/",            "limit": 5},
+    {"name": "TechCrunch AI",     "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "limit": 5},
+    {"name": "MIT Tech Review",   "url": "https://www.technologyreview.com/feed/",                "limit": 5},
+    {"name": "Bleeding Balls HN", "url": "https://hnrss.org/frontpage",                           "limit": 8},
+    {"name": "Juya AI Daily",     "url": "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml", "limit": 5},
 ]
 
 FINANCE_RSS_SOURCES = [
-    {"name": "华尔街见闻",       "url": "https://wallstreetcn.com/rss",                   "limit": 8},
-    {"name": "36氪",             "url": "https://36kr.com/feed",                          "limit": 8},
-    {"name": "FT中文网",         "url": "https://www.ftchinese.com/rss",                  "limit": 5},
-    {"name": "新浪财经",         "url": "https://rss.sina.com.cn/news/china/focus15.xml", "limit": 5},
-    {"name": "证券时报",         "url": "https://www.stcn.com/rss/",                      "limit": 5},
+    {"name": "华尔街见闻",        "url": "https://wallstreetcn.com/rss",                   "limit": 8},
+    {"name": "36氪",              "url": "https://36kr.com/feed",                           "limit": 8},
+    {"name": "FT中文网",          "url": "https://www.ftchinese.com/rss",                   "limit": 5},
+    {"name": "新浪财经",          "url": "https://rss.sina.com.cn/news/china/focus15.xml", "limit": 5},
+    {"name": "证券时报",          "url": "https://www.stcn.com/rss/",                      "limit": 5},
 ]
 
 # ---------- 工具函数 ----------
@@ -39,18 +39,26 @@ def clean_html(html_text):
     """去掉 HTML 标签和多余空白"""
     if not html_text:
         return ""
-    # 去掉 HTML 标签
     text = re.sub(r'<[^>]+>', '', html_text)
-    # 解码常见 HTML 实体
     text = text.replace('&nbsp;', ' ').replace('&amp;', '&')
     text = text.replace('&lt;', '<').replace('&gt;', '>').replace('&quot;', '"')
     text = text.replace('&#39;', "'")
-    # 合并多余空白
     text = re.sub(r'\s+', ' ', text).strip()
     return text
 
+def parse_dt(e):
+    """把 email.utils 返回的 aware datetime 转成 naive UTC 时间戳字符串，
+       用于安全排序（字符串比较不受时区影响）。"""
+    try:
+        dt = parsedate_to_datetime(e["published"])
+        # 转 UTC 再剥时区，保证 naive 化后时间正确
+        utc_dt = dt.astimezone(timezone.utc).replace(tzinfo=None)
+        return utc_dt.isoformat()
+    except Exception:
+        return None
+
 def fetch_rss(sources, limit_per_source=5):
-    """抓取多个 RSS 源，按时间去重合并"""
+    """抓取多个 RSS 源，按时间倒序合并"""
     seen_urls = set()
     all_entries = []
 
@@ -59,72 +67,61 @@ def fetch_rss(sources, limit_per_source=5):
         try:
             d = feedparser.parse(url)
             for entry in d.entries[:src.get("limit", limit_per_source)]:
-                # 优先用 link 去重
                 link = entry.get("link", "").strip()
                 if link and link in seen_urls:
                     continue
                 seen_urls.add(link)
 
                 title = clean_html(entry.get("title", ""))
-                # 优先取 summary-detail（完整摘要），fallback 到 summary（可能是 HTML）
-                summary_raw = entry.get("summary_detail", {}).get("value", "") \
-                           or entry.get("summary", "") \
-                           or entry.get("description", "")
+                summary_raw = (
+                    entry.get("summary_detail", {}).get("value", "")
+                    or entry.get("summary", "")
+                    or entry.get("description", "")
+                )
                 summary = clean_html(summary_raw)
-
-                # 有些 RSS 的 title 本身就很长，做一次截断
                 if len(summary) > 500:
                     summary = summary[:500] + "…"
 
                 all_entries.append({
-                    "source": src["name"],
-                    "title":  title,
-                    "summary": summary,
-                    "link":   link,
+                    "source":    src["name"],
+                    "title":     title,
+                    "summary":   summary,
+                    "link":      link,
                     "published": entry.get("published", ""),
                 })
         except Exception as e:
             print(f"[WARN] 抓取 RSS 失败 {url}: {e}")
 
-    # 按 published 时间逆序（越新越前），没有时间戳的放最后
-    # 注意：parsedate_to_datetime 可能返回 aware 或 naive，统一转成 naive 再比较
-    def to_naive(dt):
-        if dt.tzinfo is not None:
-            dt = dt.replace(tzinfo=None)
-        return dt
-
+    # 按发布时间倒序：有效时间戳用 (0, iso_str)，无效的用 (1, "") 放最后
     def sort_key(e):
-        try:
-            dt = parsedate_to_datetime(e["published"])
-            return to_naive(dt)
-        except Exception:
-            return datetime.min
+        iso = parse_dt(e)
+        return (0, iso) if iso is not None else (1, "")
     all_entries.sort(key=sort_key, reverse=True)
     return all_entries
 
 def dedup_by_title(entries):
-    """简单标题去重（防止相似标题重复出现）"""
+    """简单标题去重"""
     if not entries:
         return entries
     result = [entries[0]]
     titles_lower = [entries[0]["title"].lower()]
     for e in entries[1:]:
         title = e["title"].lower()
-        # 简单检查：标题是否已存在（包含关系）
-        is_dup = any(title in t or t in title for t in titles_lower)
-        if not is_dup:
+        if not any(title in t or t in title for t in titles_lower):
             result.append(e)
             titles_lower.append(title)
     return result
 
-# ---------- Gemini 总结 ----------
+# ---------- Gemini ----------
 def summarize_with_gemini(prompt, model="gemini-3.1-flash-lite-preview"):
     if not GEMINI_API_KEY:
         print("GEMINI_API_KEY not set.")
         return None
     try:
-        url = (f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
-               f":generateContent?key={GEMINI_API_KEY}")
+        url = (
+            f"https://generativelanguage.googleapis.com/v1beta/models/{model}"
+            f":generateContent?key={GEMINI_API_KEY}"
+        )
         payload = {"contents": [{"parts": [{"text": prompt}]}]}
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(url, data=data,
@@ -132,9 +129,9 @@ def summarize_with_gemini(prompt, model="gemini-3.1-flash-lite-preview"):
         resp = urllib.request.urlopen(req, context=ctx, timeout=60)
         resp_data = json.loads(resp.read().decode("utf-8"))
         candidates = resp_data.get("candidates", [{}])
-        content = candidates[0].get("content", {}) if candidates else {}
+        content = (candidates[0].get("content", {}) if candidates else {})
         parts = content.get("parts", [{}])
-        return parts[0].get("text") if parts else None
+        return (parts[0].get("text") if parts else None)
     except Exception as e:
         print(f"[ERROR] Gemini 调用失败: {e}")
         return None
@@ -160,22 +157,18 @@ def send_message(text, silent=False):
         if result.get("ok"):
             print(f"[OK] 消息发送成功")
             return True
-        else:
-            print(f"[ERROR] 发送失败: {result}")
-            return False
+        print(f"[ERROR] 发送失败: {result}")
+        return False
     except Exception as e:
         print(f"[ERROR] 发送请求失败: {e}")
         return False
 
 def split_and_send(text, max_chars=1800):
-    """内容过长时拆成多条发送"""
+    """内容过长拆成多条发送"""
     if len(text) <= max_chars:
         return send_message(text)
-    # 按换行分段，尽量保持段落完整
-    chunks = []
-    lines = text.split("\n")
-    current = ""
-    for line in lines:
+    chunks, current = [], ""
+    for line in text.split("\n"):
         if len(current) + len(line) + 1 <= max_chars:
             current += ("\n" if current else "") + line
         else:
@@ -186,11 +179,10 @@ def split_and_send(text, max_chars=1800):
         chunks.append(current)
     for i, chunk in enumerate(chunks):
         print(f"  -> 发送第 {i+1}/{len(chunks)} 条...")
-        send_message(chunk, silent=(i > 0))  # 第一条有声，后面静音
+        send_message(chunk, silent=(i > 0))
 
-# ---------- 主流程 ----------
+# ---------- Prompt ----------
 def build_ai_news_prompt(entries):
-    """构造 AI 新闻专用的总结 prompt"""
     news_block = "\n".join(
         f"[{i+1}] 来源：{e['source']}\n    标题：{e['title']}\n    摘要：{e['summary']}\n    链接：{e['link']}"
         for i, e in enumerate(entries)
@@ -216,7 +208,6 @@ def build_ai_news_prompt(entries):
 {news_block}"""
 
 def build_finance_news_prompt(entries):
-    """构造财经新闻专用的总结 prompt"""
     news_block = "\n".join(
         f"[{i+1}] 来源：{e['source']}\n    标题：{e['title']}\n    摘要：{e['summary']}\n    链接：{e['link']}"
         for i, e in enumerate(entries)
@@ -241,6 +232,7 @@ def build_finance_news_prompt(entries):
 
 {news_block}"""
 
+# ---------- 主流程 ----------
 def main():
     if not GEMINI_API_KEY or not TOKEN:
         print("缺少必要的环境变量。")
@@ -248,40 +240,26 @@ def main():
 
     date_str = datetime.now().strftime("%Y-%m-%d")
 
-    # ---- 抓取 AI 新闻 ----
     print("==> 抓取 AI / 科技新闻...")
     ai_raw = fetch_rss(AI_RSS_SOURCES)
     ai_raw = dedup_by_title(ai_raw)
     print(f"    共获取 {len(ai_raw)} 条（去重后）")
-    if not ai_raw:
-        ai_text = "今日暂无 AI 领域资讯。"
-    else:
-        prompt = build_ai_news_prompt(ai_raw)
-        ai_text = summarize_with_gemini(prompt) or "今日 AI 资讯整理失败。"
-        print(f"    AI 总结完成，长度 {len(ai_text)} 字")
+    ai_text = summarize_with_gemini(build_ai_news_prompt(ai_raw)) if ai_raw else "今日暂无 AI 领域资讯。"
+    print(f"    AI 总结完成，长度 {len(ai_text)} 字")
 
-    # ---- 抓取财经新闻 ----
     print("==> 抓取财经新闻...")
     finance_raw = fetch_rss(FINANCE_RSS_SOURCES)
     finance_raw = dedup_by_title(finance_raw)
     print(f"    共获取 {len(finance_raw)} 条（去重后）")
-    if not finance_raw:
-        finance_text = "今日暂无财经资讯。"
-    else:
-        prompt = build_finance_news_prompt(finance_raw)
-        finance_text = summarize_with_gemini(prompt) or "今日财经资讯整理失败。"
-        print(f"    财经总结完成，长度 {len(finance_text)} 字")
+    finance_text = summarize_with_gemini(build_finance_news_prompt(finance_raw)) if finance_raw else "今日暂无财经资讯。"
+    print(f"    财经总结完成，长度 {len(finance_text)} 字")
 
-    # ---- 组合发送 ----
     header = f"**📅 每日新闻 {date_str}**\n\n"
-
     ai_section = f"**【AI · 科技】**\n\n{ai_text}\n\n——\n"
     finance_section = f"**【财经 · 市场】**\n\n{finance_text}"
-
-    # 如果合并后太长，分开发；否则合并为一条
     combined = header + ai_section + finance_section
+
     if len(combined) > 3500:
-        # 分两条发：先发 AI
         send_message(header + ai_section)
         send_message(header + finance_section)
     else:
