@@ -3,7 +3,8 @@ import json
 import re
 import ssl
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 import feedparser
 
 # ---------- 配置 ----------
@@ -86,15 +87,16 @@ def fetch_rss(sources, limit_per_source=5):
             print(f"[WARN] 抓取 RSS 失败 {url}: {e}")
 
     # 按 published 时间逆序（越新越前），没有时间戳的放最后
-    from email.utils import parsedate_to_datetime
-    from datetime import timezone
+    # 注意：parsedate_to_datetime 可能返回 aware 或 naive，统一转成 naive 再比较
+    def to_naive(dt):
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt
+
     def sort_key(e):
         try:
             dt = parsedate_to_datetime(e["published"])
-            # 统一转成 naive datetime 方便比较
-            if dt.tzinfo is not None:
-                dt = dt.replace(tzinfo=None)
-            return dt
+            return to_naive(dt)
         except Exception:
             return datetime.min
     all_entries.sort(key=sort_key, reverse=True)
