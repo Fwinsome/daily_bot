@@ -118,7 +118,7 @@ def dedup_by_title(entries):
     return result
 
 # ---------- Gemini 总结 ----------
-def summarize_with_gemini(prompt, model="gemini-2.0-flash"):
+def summarize_with_gemini(prompt, model="gemini-3.1-flash-lite-preview"):
     if not GEMINI_API_KEY:
         print("GEMINI_API_KEY not set.")
         return None
