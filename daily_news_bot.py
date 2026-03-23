@@ -184,22 +184,22 @@ def split_and_send(text, max_chars=1800):
 # ---------- Prompt ----------
 def build_ai_news_prompt(entries):
     news_block = "\n".join(
-        f"[{i+1}] 来源：{e['source']}\n    标题：{e['title']}\n    摘要：{e['summary']}\n    链接：{e['link']}"
+        f"[{i+1}] 来源：{e['source']}\n    标题：{e['title']}\n    摘要：{e['summary']}"
         for i, e in enumerate(entries)
     )
     return f"""你是一个专业、简洁的科技新闻编辑。请从以下今日 AI / 科技领域资讯中提炼出真正有价值的信息。
 
 任务要求：
-1. 为每条新闻输出一行「一句话核心要点」（不超过 30 字），紧接着给出原始标题和链接。
+1. 为每条新闻输出一行「一句话核心要点」（不超过 30 字），紧接着给出原始标题。
 2. 按重要性排序（最重要的放最前）。
 3. 只保留有价值的内容，无关紧要的新闻可以直接跳过不呈现。
 4. 不要重复标题，不要添加你自己的解释性话语，直接输出结构化内容。
 5. 标题前加 "🔹" 前缀。
+6. 英文内容单独成行，不要与中文混在同一行。
 
 输出格式（严格按此格式）：
 🔹 [一句话要点]
    标题：xxx
-   链接：xxx
 
 ---
 
@@ -209,22 +209,22 @@ def build_ai_news_prompt(entries):
 
 def build_finance_news_prompt(entries):
     news_block = "\n".join(
-        f"[{i+1}] 来源：{e['source']}\n    标题：{e['title']}\n    摘要：{e['summary']}\n    链接：{e['link']}"
+        f"[{i+1}] 来源：{e['source']}\n    标题：{e['title']}\n    摘要：{e['summary']}"
         for i, e in enumerate(entries)
     )
     return f"""你是一个专业、简洁的财经新闻编辑。请从以下今日财经领域资讯中提炼出真正有价值的信息。
 
 任务要求：
-1. 为每条新闻输出一行「一句话核心要点」（不超过 30 字），紧接着给出原始标题和链接。
+1. 为每条新闻输出一行「一句话核心要点」（不超过 30 字），紧接着给出原始标题。
 2. 按重要性排序（最重要的放最前）。
 3. 只保留有价值的内容，无关紧要的新闻可以直接跳过不呈现。
 4. 不要重复标题，不要添加你自己的解释性话语，直接输出结构化内容。
 5. 标题前加 "🔸" 前缀。
+6. 英文内容单独成行，不要与中文混在同一行。
 
 输出格式（严格按此格式）：
 🔸 [一句话要点]
    标题：xxx
-   链接：xxx
 
 ---
 
@@ -259,11 +259,7 @@ def main():
     finance_section = f"**【财经 · 市场】**\n\n{finance_text}"
     combined = header + ai_section + finance_section
 
-    if len(combined) > 3500:
-        send_message(header + ai_section)
-        send_message(header + finance_section)
-    else:
-        split_and_send(combined)
+    send_message(combined)
 
     print("==> 每日新闻发送完成。")
 
