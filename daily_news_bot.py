@@ -113,7 +113,7 @@ def dedup_by_title(entries):
     return result
 
 # ---------- Gemini ----------
-def summarize_with_gemini(prompt, model="gemini-3.1-pro"):
+def summarize_with_gemini(prompt, model="gemini-3.1-flash-lite-preview"):
     if not GEMINI_API_KEY:
         print("GEMINI_API_KEY not set.")
         return None
@@ -195,11 +195,11 @@ def build_ai_news_prompt(entries):
 3. 只保留有价值的内容，无关紧要的新闻可以直接跳过不呈现。
 4. 不要重复标题，不要添加你自己的解释性话语，直接输出结构化内容。
 5. 标题前加 "🔹" 前缀。
-6. 英文内容单独成行，不要与中文混在同一行。
+6. 英文标题、产品名、技术术语等必须单独成行，不允许英文与中文混在同一行内。
 
 输出格式（严格按此格式）：
 🔹 [一句话要点]
-   标题：xxx
+   标题：中文标题（英文内容单独另起一行）
 
 ---
 
@@ -220,11 +220,11 @@ def build_finance_news_prompt(entries):
 3. 只保留有价值的内容，无关紧要的新闻可以直接跳过不呈现。
 4. 不要重复标题，不要添加你自己的解释性话语，直接输出结构化内容。
 5. 标题前加 "🔸" 前缀。
-6. 英文内容单独成行，不要与中文混在同一行。
+6. 英文标题、产品名、术语等必须单独成行，不允许英文与中文混在同一行内。
 
 输出格式（严格按此格式）：
 🔸 [一句话要点]
-   标题：xxx
+   标题：中文标题（英文内容单独另起一行）
 
 ---
 
@@ -245,14 +245,22 @@ def main():
     ai_raw = dedup_by_title(ai_raw)
     print(f"    共获取 {len(ai_raw)} 条（去重后）")
     ai_text = summarize_with_gemini(build_ai_news_prompt(ai_raw)) if ai_raw else "今日暂无 AI 领域资讯。"
-    print(f"    AI 总结完成，长度 {len(ai_text)} 字")
+    if ai_text:
+        print(f"    AI 总结完成，长度 {len(ai_text)} 字")
+    else:
+        ai_text = "今日 AI 资讯整理失败。"
+        print(f"    AI 总结失败，使用默认文本")
 
     print("==> 抓取财经新闻...")
     finance_raw = fetch_rss(FINANCE_RSS_SOURCES)
     finance_raw = dedup_by_title(finance_raw)
     print(f"    共获取 {len(finance_raw)} 条（去重后）")
     finance_text = summarize_with_gemini(build_finance_news_prompt(finance_raw)) if finance_raw else "今日暂无财经资讯。"
-    print(f"    财经总结完成，长度 {len(finance_text)} 字")
+    if finance_text:
+        print(f"    财经总结完成，长度 {len(finance_text)} 字")
+    else:
+        finance_text = "今日财经资讯整理失败。"
+        print(f"    财经总结失败，使用默认文本")
 
     header = f"**📅 每日新闻 {date_str}**\n\n"
     ai_section = f"**【AI · 科技】**\n\n{ai_text}\n\n——\n"
