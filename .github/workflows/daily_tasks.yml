@@ -14,22 +14,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.10'
           cache: 'pip'
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Run Ruanyifeng Weekly Bot
-        env:
-          SERVERCHAN_TOKEN: ${{ secrets.SERVERCHAN_TOKEN }}
-          GEMINI_API_KEY:   ${{ secrets.GEMINI_API_KEY }}
-        run: python ruanyf_weekly_bot.py
 
       - name: Run Daily News Summary Bot
         env:
