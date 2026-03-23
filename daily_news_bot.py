@@ -11,6 +11,7 @@ import feedparser
 TOKEN = os.environ.get("SERVERCHAN_TOKEN", "")
 CHAT_ID = int(os.environ.get("CHAT_ID", "18148"))
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+DRY_RUN = os.environ.get("DRY_RUN", "false").lower() == "true"
 
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
@@ -138,6 +139,11 @@ def summarize_with_gemini(prompt, model="gemini-3.1-flash-lite-preview"):
 
 # ---------- 发送消息 ----------
 def send_message(text, silent=False):
+    if DRY_RUN:
+        print("=== [DRY_RUN] 消息内容如下 ===")
+        print(text)
+        print("=== DRY_RUN END ===")
+        return True
     if not TOKEN:
         print("[ERROR] SERVERCHAN_TOKEN 未设置")
         return False
@@ -190,16 +196,16 @@ def build_ai_news_prompt(entries):
     return f"""你是一个专业、简洁的科技新闻编辑。请从以下今日 AI / 科技领域资讯中提炼出真正有价值的信息。
 
 任务要求：
-1. 每条新闻输出四个独立行：一句话要点、原始标题、英文内容、来源，每个元素单独成行。
+1. 每条新闻输出四个独立行：一句话要点、原始标题、英文内容（如原文为中文则填"无"）、来源，每个元素单独成行。
 2. 按重要性排序（最重要的放最前）。
 3. 只保留有价值的内容，无关紧要的新闻可以直接跳过不呈现。
 4. 不要重复标题，不要添加你自己的解释性话语，直接输出结构化内容。
 5. 每条前加 "🔹" 前缀。
 
-输出格式（严格按此格式，每行以 ● 开头）：
+输出格式（严格按此格式）：
 🔹 一句话核心要点（不超过 30 字）
    标题：xxx
-   英文：xxx（英文内容单独一行，若无英文则写"无"）
+   英文：xxx（若原文为中文则填"无"）
    来源：xxx
 
 ---
@@ -216,16 +222,16 @@ def build_finance_news_prompt(entries):
     return f"""你是一个专业、简洁的财经新闻编辑。请从以下今日财经领域资讯中提炼出真正有价值的信息。
 
 任务要求：
-1. 每条新闻输出四个独立行：一句话要点、原始标题、英文内容、来源，每个元素单独成行。
+1. 每条新闻输出四个独立行：一句话要点、原始标题、英文内容（如原文为中文则填"无"）、来源，每个元素单独成行。
 2. 按重要性排序（最重要的放最前）。
 3. 只保留有价值的内容，无关紧要的新闻可以直接跳过不呈现。
 4. 不要重复标题，不要添加你自己的解释性话语，直接输出结构化内容。
 5. 每条前加 "🔸" 前缀。
 
-输出格式（严格按此格式，每行以 ● 开头）：
+输出格式（严格按此格式）：
 🔸 一句话核心要点（不超过 30 字）
    标题：xxx
-   英文：xxx（英文内容单独一行，若无英文则写"无"）
+   英文：xxx（若原文为中文则填"无"）
    来源：xxx
 
 ---
