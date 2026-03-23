@@ -86,10 +86,15 @@ def fetch_rss(sources, limit_per_source=5):
             print(f"[WARN] 抓取 RSS 失败 {url}: {e}")
 
     # 按 published 时间逆序（越新越前），没有时间戳的放最后
+    from email.utils import parsedate_to_datetime
+    from datetime import timezone
     def sort_key(e):
         try:
-            from email.utils import parsedate_to_datetime
-            return parsedate_to_datetime(e["published"])
+            dt = parsedate_to_datetime(e["published"])
+            # 统一转成 naive datetime 方便比较
+            if dt.tzinfo is not None:
+                dt = dt.replace(tzinfo=None)
+            return dt
         except Exception:
             return datetime.min
     all_entries.sort(key=sort_key, reverse=True)
@@ -111,7 +116,7 @@ def dedup_by_title(entries):
     return result
 
 # ---------- Gemini 总结 ----------
-def summarize_with_gemini(prompt, model="gemini-2.0-flash"):
+def summarize_with_gemini(prompt, model="gemini-3.1-flash-lite-preview"):
     if not GEMINI_API_KEY:
         print("GEMINI_API_KEY not set.")
         return None
