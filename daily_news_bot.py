@@ -3,7 +3,6 @@ import json
 import re
 import ssl
 import urllib.request
-import urllib.parse
 from datetime import datetime
 import feedparser
 
@@ -96,7 +95,7 @@ def fetch_rss(sources, limit_per_source=5):
     all_entries.sort(key=sort_key, reverse=True)
     return all_entries
 
-def dedup_by_title(entries, threshold=0.8):
+def dedup_by_title(entries):
     """简单标题去重（防止相似标题重复出现）"""
     if not entries:
         return entries
@@ -125,7 +124,10 @@ def summarize_with_gemini(prompt, model="gemini-2.0-flash"):
               headers={"Content-Type": "application/json"})
         resp = urllib.request.urlopen(req, context=ctx, timeout=60)
         resp_data = json.loads(resp.read().decode("utf-8"))
-        return resp_data["candidates"][0]["content"]["parts"][0]["text"]
+        candidates = resp_data.get("candidates", [{}])
+        content = candidates[0].get("content", {}) if candidates else {}
+        parts = content.get("parts", [{}])
+        return parts[0].get("text") if parts else None
     except Exception as e:
         print(f"[ERROR] Gemini 调用失败: {e}")
         return None
