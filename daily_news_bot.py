@@ -19,10 +19,10 @@ ctx.verify_mode = ssl.CERT_NONE
 # ---------- 数据源配置 ----------
 AI_RSS_SOURCES = [
     {"name": "Hacker News",      "url": "https://news.ycombinator.com/rss",              "limit": 10},
-    {"name": "VentureBeat AI",   "https://venturebeat.com/category/ai/feed/",            "limit": 5},
-    {"name": "TechCrunch AI",   "https://techcrunch.com/category/artificial-intelligence/feed/", "limit": 5},
-    {"name": "MIT Tech Review",  "https://www.technologyreview.com/feed/",                "limit": 5},
-    {"name": "Bleeding Balls HN","https://hnrss.org/frontpage",                           "limit": 8},
+    {"name": "VentureBeat AI",   "url": "https://venturebeat.com/category/ai/feed/",            "limit": 5},
+    {"name": "TechCrunch AI",   "url": "https://techcrunch.com/category/artificial-intelligence/feed/", "limit": 5},
+    {"name": "MIT Tech Review",  "url": "https://www.technologyreview.com/feed/",                "limit": 5},
+    {"name": "Bleeding Balls HN","url": "https://hnrss.org/frontpage",                           "limit": 8},
     {"name": "Juya AI Daily",    "https://raw.githubusercontent.com/imjuya/juya-ai-daily/master/rss.xml", "limit": 5},
 ]
 
